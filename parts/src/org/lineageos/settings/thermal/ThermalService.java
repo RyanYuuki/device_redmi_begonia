@@ -18,16 +18,14 @@ package org.lineageos.settings.thermal;
 
 import android.app.ActivityManager;
 import android.app.ActivityTaskManager;
-import android.app.ActivityTaskManager.RootTaskInfo;
-import android.app.IActivityTaskManager;
 import android.app.TaskStackListener;
 import android.app.Service;
-import android.app.TaskStackListener;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.res.Configuration;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.util.Log;
@@ -40,13 +38,12 @@ public class ThermalService extends Service {
     private String mPreviousApp;
     private ThermalUtils mThermalUtils;
 
-    private IActivityTaskManager mActivityTaskManager;
-
     private BroadcastReceiver mIntentReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             mPreviousApp = "";
             mThermalUtils.setDefaultThermalProfile();
+            mThermalUtils.resetTouchModes();
         }
     };
 
@@ -54,8 +51,7 @@ public class ThermalService extends Service {
     public void onCreate() {
         if (DEBUG) Log.d(TAG, "Creating service");
         try {
-            mActivityTaskManager = ActivityTaskManager.getService();
-            mActivityTaskManager.registerTaskStackListener(mTaskListener);
+            ActivityTaskManager.getService().registerTaskStackListener(mTaskListener);
         } catch (RemoteException e) {
             // Do nothing
         }
@@ -75,10 +71,15 @@ public class ThermalService extends Service {
         return null;
     }
 
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        mThermalUtils.updateTouchRotation();
+    }
+
     private void registerReceiver() {
         IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_SCREEN_OFF);
-        filter.addAction(Intent.ACTION_SCREEN_ON);
         this.registerReceiver(mIntentReceiver, filter);
     }
 
@@ -86,15 +87,15 @@ public class ThermalService extends Service {
         @Override
         public void onTaskStackChanged() {
             try {
-                final RootTaskInfo info = mActivityTaskManager.getFocusedRootTaskInfo();
-                if (info == null || info.topActivity == null) {
-                    return;
-                }
-
-                String foregroundApp = info.topActivity.getPackageName();
-                if (!foregroundApp.equals(mPreviousApp)) {
-                    mThermalUtils.setThermalProfile(foregroundApp);
-                    mPreviousApp = foregroundApp;
+                final ActivityManager.StackInfo focusedStack =
+                        ActivityTaskManager.getService().getFocusedStackInfo();
+                if (focusedStack != null && focusedStack.topActivity != null) {
+                    ComponentName taskComponentName = focusedStack.topActivity;
+                    String foregroundApp = taskComponentName.getPackageName();
+                    if (!foregroundApp.equals(mPreviousApp)) {
+                        mThermalUtils.setThermalProfile(foregroundApp);
+                        mPreviousApp = foregroundApp;
+                    }
                 }
             } catch (Exception e) {}
         }
